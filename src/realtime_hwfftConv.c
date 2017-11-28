@@ -90,12 +90,14 @@ void olap_add(complex *, Int16 *, Uint16, Uint16);
 
 extern Int16 hwafft_1024pts(Int32 *, Int32 *, Uint16, Uint16);
 extern void hwafft_br(Int32 *, Int32 *, Uint16);
-extern void freqflt(complex *, complex *, Uint16);
+
 
 #define FFT_FLAG        0        /* HWA to perform FFT */
 #define IFFT_FLAG       1        /* HWA to perform IFFT */
 #define SCALE_FLAG      0        /* HWA to scale butterfly output */
 #define NOSCALE_FLAG    1        /* HWA not to scale butterfly output */
+
+Uint16 c=0;
 
 void hwFFTConv_init(void)
 {
@@ -138,87 +140,41 @@ void hwFFTConv_init(void)
 
 void hwFFTConv(void)
 {
-	Int32 n=0;
-	Int16 i,j=0;
 
-	printf("Hardware FFT convolution status:\n");
-	j = 1;
-	printf("on\n");
     while (1)			/* Forever loop for the demo if status is set */
     {
-        /**
-    	if (n++ == (0x4000000))
-    	{
-    		n = 0;
-    		j++;;
-    		if (j &= 1)
-    			printf("on\n");
-    		else
-    			printf("off\n");
-    	}
-        */
         if(leftChannel == 1)
         {
         	leftChannel = 0;
             if (CurrentRxL_DMAChannel == 2)
             {
-            	if (j) /* Filter the input audio data and send to output */
-            	{
-            		fftConv(RcvL1, XmitL1, x, temp, overLapL);
-            	}
-            	else  /* Without filter, pass through the audio */
-            	{
-            		for(i=0; i<DATA_LEN; i++)
-            		{
-            			XmitL1[i] = RcvL1[i];
-            		}
-            	}
+            	fftConv(RcvL1, XmitL1, x, temp, overLapL);
             }
             else
             {
-            	if (j) /* Filter the input audio data and send to output */
-            	{
-            		fftConv(RcvL2, XmitL2, x, temp, overLapL);
-            	}
-            	else  /* Without filter, pass through the audio */
-            	{
-            		for(i=0; i<DATA_LEN; i++)
-            		{
-            			XmitL2[i] = RcvL2[i];
-            		}
-            	}
-             }
+            	fftConv(RcvL2, XmitL2, x, temp, overLapL);
+            }
         }
         if(rightChannel == 1)
         {
         	rightChannel= 0;
             if (CurrentRxR_DMAChannel == 2)
             {
-            	if (j) /* Filter the input audio data and send to output */
-            	{
-            		fftConv(RcvR1, XmitR1, x, temp, overLapR);
+            	//fftConv(RcvR1, XmitR1, x, temp, overLapR);
+                /*
+            	for (Uint16 z=0; z<FFT_PTS; z++){
+            	    RcvR1[z] = XmitR1[z];
             	}
-            	else  /* Without filter, pass through the audio */
-            	{
-            		for(i=0; i<DATA_LEN; i++)
-            		{
-            			XmitR1[i] = RcvR1[i];
-            		}
-            	}
+            	*/
             }
             else
             {
-            	if (j) /* Filter the input audio data and send to output */
-            	{
-            		fftConv(RcvR2, XmitR2, x, temp, overLapR);
+            	//fftConv(RcvR2, XmitR2, x, temp, overLapR);
+                /*
+            	for (Uint16 z=0; z<FFT_PTS; z++){
+            	    RcvR2[z] = XmitR2[z];
             	}
-            	else  /* Without filter, pass through the audio */
-            	{
-            		for(i=0; i<DATA_LEN; i++)
-            		{
-            			XmitR2[i] = RcvR2[i];
-            		}
-            	}
+            	*/
             }
         }
     }
@@ -227,6 +183,7 @@ void hwFFTConv(void)
 void fftConv(Int16 *inDataPtr, Int16* outDataPtr, complex *x, complex *temp, Int16 *ol)
 {
     Uint16 i;
+
 
     for (i=0; i<DATA_LEN; i++)
     {
@@ -253,6 +210,14 @@ void fftConv(Int16 *inDataPtr, Int16* outDataPtr, complex *x, complex *temp, Int
     olap_add(x,ol,DATA_LEN,FFT_PTS);
     for (i=0; i<DATA_LEN; i++)
     {
-    	outDataPtr[i] = x[i].re;
+        outDataPtr[i] = x[i].re;
+    }
+
+    for (i=0; i<DATA_LEN; i++){
+        if (x[i].re > 750 || x[i].re < -750) {
+            printf("%i\n",c);
+            c++;
+            break;
+        }
     }
 }
