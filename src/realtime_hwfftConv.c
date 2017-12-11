@@ -16,8 +16,9 @@
 #include "tistdtypes.h"
 #include "dma.h"
 #include "dmaBuff.h"
-
 #include "icomplex.h"    		/* Integer complex.h header file */
+#include "popcorn_pop_coefs.h"
+#include "timer.h"
 
 /* Define DSP system memory map */
 #pragma DATA_SECTION(XmitL1, "XmitL1");
@@ -72,16 +73,6 @@ complex convolved[FFT_PTS];
 #pragma DATA_ALIGN(coeffs_fft, 2*FFT_PTS);
 complex coeffs_fft[FFT_PTS];
 
-#if 	USE_FLT511
-#include "fdacoefs2k_48k_511.h"
-#elif   USE_FLT255
-#include "fdacoefs2k_48k_255.h"
-#elif   USE_FLT127
-#include "fdacoefs2k_48k_127.h"
-#elif   USE_FLT63
-#include "fdacoefs2k_48k_63.h"
-#endif
-
 
 void hwFFTConv(void);
 void hwFFTConv_init(void);
@@ -97,13 +88,12 @@ extern void hwafft_br(Int32 *, Int32 *, Uint16);
 #define SCALE_FLAG      0        /* HWA to scale butterfly output */
 #define NOSCALE_FLAG    1        /* HWA not to scale butterfly output */
 
-Uint16 c=0;
+#define LED_OUT1 *((ioport volatile Uint16*) 0x1C0A )
+Uint16 tmr;
 
-void hwFFTConv_init(void)
-{
+void hwFFTConv_init(void) {
 	Int16 i;
-	for (i=0; i<FFT_PTS; i++)
-	{
+	for (i=0; i<FFT_PTS; i++) {
 		XmitL1[i]=0;
 		XmitL2[i]=0;
 		XmitR1[i]=0;
@@ -115,20 +105,17 @@ void hwFFTConv_init(void)
 	}
 
 	/* zero Overlap buffers */
-	for(i=0; i< (FFT_PTS-FLT_LEN); i++)
-	{
+	for(i=0; i< (FFT_PTS-FLT_LEN); i++) {
 		overLapL[i] = 0;
 		overLapR[i] = 0;
 	}
 
 	/* load coeffs and zero-pad to FFT_PTS */
-	for(i=0; i<FLT_LEN; i++)
-	{
+	for(i=0; i<FLT_LEN; i++) {
 	    temp[i].re = coeffs[i];
 	    temp[i].im = 0;
 	}
-	for(; i<FFT_PTS; i++)
-	{
+	for(; i<FFT_PTS; i++) {
 	 	temp[i].re = 0;
 	   	temp[i].im = 0;
 	}
@@ -138,85 +125,83 @@ void hwFFTConv_init(void)
 	hwafft_1024pts((Int32 *)x, (Int32 *)coeffs_fft, FFT_FLAG, NOSCALE_FLAG); // perform FFT
 }
 
-void hwFFTConv(void)
-{
+void hwFFTConv(void) {
+    Uint16 i = 0;
+    LED_OUT1 |= (1<<(15)); // set yellow led off
 
-    while (1)			/* Forever loop for the demo if status is set */
-    {
-        if(leftChannel == 1)
-        {
+    Timer0Init();
+    StartTimer0();
+
+    while (1) {
+
+        tmr = *CPU_TIM0_CHWR; // debug variable to watch
+        if (*CPU_TIM0_CHWR == 0){
+            LED_OUT1 &= ~(1<<(15)); // set led on
+        } else {
+            LED_OUT1 |= (1<<(15)); // set led off
+        }
+
+        if(leftChannel == 1) {
         	leftChannel = 0;
-            if (CurrentRxL_DMAChannel == 2)
-            {
+
+            if (CurrentRxL_DMAChannel == 2) {
             	fftConv(RcvL1, XmitL1, x, temp, overLapL);
-            }
-            else
-            {
+            } else {
             	fftConv(RcvL2, XmitL2, x, temp, overLapL);
             }
         }
-        if(rightChannel == 1)
-        {
+        if(rightChannel == 1) { // output right channel input
         	rightChannel= 0;
-            if (CurrentRxR_DMAChannel == 2)
-            {
-            	//fftConv(RcvR1, XmitR1, x, temp, overLapR);
-                /*
-            	for (Uint16 z=0; z<FFT_PTS; z++){
-            	    RcvR1[z] = XmitR1[z];
-            	}
-            	*/
+
+            if (CurrentRxR_DMAChannel == 2) {
+                for(i=0; i<DATA_LEN; i++) {
+                    XmitR1[i] = RcvR1[i];
+               }
             }
-            else
-            {
-            	//fftConv(RcvR2, XmitR2, x, temp, overLapR);
-                /*
-            	for (Uint16 z=0; z<FFT_PTS; z++){
-            	    RcvR2[z] = XmitR2[z];
-            	}
-            	*/
+            else {
+                for(i=0; i<DATA_LEN; i++) {
+                    XmitR2[i] = RcvR2[i];
+                }
             }
         }
     }
 }
 
-void fftConv(Int16 *inDataPtr, Int16* outDataPtr, complex *x, complex *temp, Int16 *ol)
-{
+void fftConv(Int16 *inDataPtr, Int16* outDataPtr, complex *x, complex *temp, Int16 *ol) {
     Uint16 i;
 
-
-    for (i=0; i<DATA_LEN; i++)
-    {
+    for (i=0; i<DATA_LEN; i++) {
         x[i].re = *inDataPtr++;
         x[i].im = 0;
     }
-    for (; i<FFT_PTS; i++)
-    {
+    for (; i<FFT_PTS; i++) {
         x[i].re = 0;
         x[i].im = 0;
     }
-    /* Start FFT */
+
+    // Start FFT
     hwafft_br((Int32 *)x, (Int32 *)temp, FFT_PTS);
     hwafft_1024pts((Int32 *)temp, (Int32 *)x, FFT_FLAG, SCALE_FLAG);
 
-    /* Filtering */
+    // Filtering (cross-correlation)
     freqflt(x,coeffs_fft,FFT_PTS);
 
-    /* Start IFFT */
+    // Start IFFT
     hwafft_br((Int32 *)x, (Int32 *)temp, FFT_PTS);
     hwafft_1024pts((Int32 *)temp, (Int32 *)x, IFFT_FLAG, NOSCALE_FLAG);
 
-    /* Overlap and add */
+    // Overlap and add
     olap_add(x,ol,DATA_LEN,FFT_PTS);
-    for (i=0; i<DATA_LEN; i++)
-    {
+    for (i=0; i<DATA_LEN; i++) {
         outDataPtr[i] = x[i].re;
     }
 
-    for (i=0; i<DATA_LEN; i++){
-        if (x[i].re > 750 || x[i].re < -750) {
-            printf("%i\n",c);
-            c++;
+    // detect single peak
+    for (i=0; i<DATA_LEN; i++) {
+        if (x[i].re > 1000) { // detect where correlation matches strongly
+            Timer0Init();
+            StartTimer0();
+            LED_OUT1 = LED_OUT1 ^ (1<<(14)); // toggle led to visualize peak
             break;
         }
     }
